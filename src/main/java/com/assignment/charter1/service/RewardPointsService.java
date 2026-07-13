@@ -2,11 +2,10 @@ package com.assignment.charter1.service;
 
 import com.assignment.charter1.model.RewardPointsResponse;
 import com.assignment.charter1.model.Transaction;
+import com.assignment.charter1.repository.TransactionRepository;
 import org.springframework.stereotype.Service;
 
-import java.time.Month;
-import java.util.ArrayList;
-import java.util.HashMap;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -14,42 +13,45 @@ import java.util.stream.Collectors;
 @Service
 public class RewardPointsService {
 
-    public int calculatePoints(Double amount) {
+    private final TransactionRepository transactionRepository;
+
+    public RewardPointsService(TransactionRepository transactionRepository) {
+        this.transactionRepository = transactionRepository;
+    }
+
+    public List<RewardPointsResponse> calculateAllCustomersRewardPoints() {
+        List<Transaction> transactions = transactionRepository.findAll();
+        return calculateRewardPoints(transactions);
+    }
+
+    private int calculatePoints(BigDecimal amount) {
+        if (amount == null) return 0;
+
+        int amountInt = amount.intValue();
         int points = 0;
-        if (amount > 100) {
-            points += 2 * (Math.floor(amount) - 100);
-            points += 50;
-        } else if (amount > 50) {
-            points += 1 * (Math.floor(amount) - 50);
+
+        if (amountInt > 100) {
+            points += 2 * (amountInt - 100) + 50;
+        } else if (amountInt > 50) {
+            points += (amountInt - 50);
         }
         return points;
     }
 
-    public List<RewardPointsResponse> calculateRewardPoints(List<Transaction> transactions) {
-        Map<Long, List<Transaction>> transactionsByCustomer = transactions.stream()
-                .collect(Collectors.groupingBy(Transaction::getCustomerId));
+    private List<RewardPointsResponse> calculateRewardPoints(List<Transaction> transactions) {
+        return transactions.stream()
+                .collect(Collectors.groupingBy(Transaction::getCustomerId))
+                .entrySet().stream()
+                .map(entry -> {
+                    Map<String, Integer> pointsPerMonth = entry.getValue().stream()
+                            .collect(Collectors.groupingBy(
+                                    t -> t.getTransactionDate().getMonth().name(),
+                                    Collectors.summingInt(t -> calculatePoints(t.getTransactionAmount()))
+                            ));
 
-        List<RewardPointsResponse> responses = new ArrayList<>();
-
-        for (Map.Entry<Long, List<Transaction>> entry : transactionsByCustomer.entrySet()) {
-            Long customerId = entry.getKey();
-            List<Transaction> customerTransactions = entry.getValue();
-
-            Map<String, Integer> pointsPerMonth = new HashMap<>();
-            int totalPoints = 0;
-
-            for (Transaction transaction : customerTransactions) {
-                Month month = transaction.getTransactionDate().getMonth();
-                String monthName = month.name();
-                int points = calculatePoints(transaction.getTransactionAmount());
-
-                pointsPerMonth.put(monthName, pointsPerMonth.getOrDefault(monthName, 0) + points);
-                totalPoints += points;
-            }
-
-            responses.add(new RewardPointsResponse(customerId, pointsPerMonth, totalPoints));
-        }
-
-        return responses;
+                    int totalPoints = pointsPerMonth.values().stream().mapToInt(Integer::intValue).sum();
+                    return new RewardPointsResponse(entry.getKey(), pointsPerMonth, totalPoints);
+                })
+                .collect(Collectors.toList());
     }
 }
